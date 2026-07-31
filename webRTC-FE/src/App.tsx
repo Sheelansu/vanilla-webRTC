@@ -1,6 +1,7 @@
 import { Route, BrowserRouter, Routes } from 'react-router-dom'
 import { Sender } from './components/Sender'
 import { Receiver } from './components/Receiver'
+import './App.css'
 
 function App() {
   return (

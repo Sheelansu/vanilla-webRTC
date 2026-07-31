@@ -1,13 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 
 export const Receiver = () => {
-    const socketRef = useRef<WebSocket | null>(null);
-    const pcRef = useRef<RTCPeerConnection | null>(null);
-    const videoRef = useRef<HTMLVideoElement | null>(null);
-
     useEffect(() => {
         const socket = new WebSocket("ws://localhost:8080");
-        socketRef.current = socket;
 
         socket.onopen = () => {
             socket.send(
@@ -15,39 +10,39 @@ export const Receiver = () => {
                     type: "identify-as-receiver",
                 })
             );
-
-            startReceiving(socket);
         };
+
+        startReceiving(socket);
 
         return () => {
             socket.close();
-            pcRef.current?.close();
         };
     }, []);
 
     const startReceiving = (socket: WebSocket) => {
-        const peerConnection = new RTCPeerConnection();
-        pcRef.current = peerConnection;
-
         const video = document.createElement("video");
         video.autoplay = true;
         video.playsInline = true;
-        document.body.appendChild(video);
-        videoRef.current = video;
 
-        peerConnection.ontrack = (event) => {
-            video.srcObject = event.streams[0];
+        document.body.appendChild(video);
+
+        const pc = new RTCPeerConnection();
+
+        pc.ontrack = (event) => {
+            console.log("Track received:", event);
+
+            video.srcObject = new MediaStream([event.track]);
         };
 
-        peerConnection.onicecandidate = (event) => {
-            if (event.candidate) {
-                socket.send(
-                    JSON.stringify({
-                        type: "ice-candidate",
-                        candidate: event.candidate,
-                    })
-                );
-            }
+        pc.onicecandidate = (event) => {
+            if (!event.candidate) return;
+
+            socket.send(
+                JSON.stringify({
+                    type: "ice-candidate",
+                    candidate: event.candidate,
+                })
+            );
         };
 
         socket.onmessage = async (event) => {
@@ -55,21 +50,24 @@ export const Receiver = () => {
 
             switch (message.type) {
                 case "create-offer":
-                    await peerConnection.setRemoteDescription(message.sdp);
+                    await pc.setRemoteDescription(message.sdp);
 
-                    const answer = await peerConnection.createAnswer();
-                    await peerConnection.setLocalDescription(answer);
+                    const answer = await pc.createAnswer();
+
+                    await pc.setLocalDescription(answer);
 
                     socket.send(
                         JSON.stringify({
                             type: "create-answer",
-                            sdp: peerConnection.localDescription,
+                            sdp: answer,
                         })
                     );
                     break;
 
                 case "ice-candidate":
-                    await peerConnection.addIceCandidate(message.candidate);
+                    if (pc.remoteDescription) {
+                    await pc.addIceCandidate(message.candidate);
+                }
                     break;
 
                 default:

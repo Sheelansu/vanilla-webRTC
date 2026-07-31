@@ -1,96 +1,107 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useState } from "react";
 
 export const Sender = () => {
-    const socketRef = useRef<WebSocket | null>(null);
-    const pcRef = useRef<RTCPeerConnection | null>(null);
+    const [socket, setSocket] = useState<WebSocket | null>(null);
+    const [peerConnection, setPeerConnection] =
+        useState<RTCPeerConnection | null>(null);
 
     useEffect(() => {
-        const socket = new WebSocket("ws://localhost:8080");
-        socketRef.current = socket;
+        const ws = new WebSocket("ws://localhost:8080");
 
-        socket.onopen = () => {
-            socket.send(
+        setSocket(ws);
+
+        ws.onopen = () => {
+            ws.send(
                 JSON.stringify({
                     type: "identify-as-sender",
                 })
             );
         };
 
-        socket.onmessage = async (event) => {
-            const message = JSON.parse(event.data);
-
-            if (!pcRef.current) return;
-
-            switch (message.type) {
-                case "create-answer":
-                    await pcRef.current.setRemoteDescription(message.sdp);
-                    break;
-
-                case "ice-candidate":
-                    await pcRef.current.addIceCandidate(message.candidate);
-                    break;
-            }
-        };
-
         return () => {
-            socket.close();
-            pcRef.current?.close();
+            ws.close();
+            peerConnection?.close();
         };
     }, []);
 
     const initiateConn = async () => {
-        if (!socketRef.current) {
-            alert("Socket not connected");
+        if (!socket) {
+            alert("Socket not found");
             return;
         }
 
-        const peerConnection = new RTCPeerConnection();
-        pcRef.current = peerConnection;
+        const pc = new RTCPeerConnection();
+        setPeerConnection(pc);
 
-        peerConnection.onicecandidate = (event) => {
-            if (event.candidate) {
-                socketRef.current?.send(
-                    JSON.stringify({
-                        type: "ice-candidate",
-                        candidate: event.candidate,
-                    })
-                );
+        socket.onmessage = async (event) => {
+            const message = JSON.parse(event.data);
+
+            switch (message.type) {
+                case "create-answer":
+                    await pc.setRemoteDescription(message.sdp);
+                    break;
+
+                case "ice-candidate":
+                    await pc.addIceCandidate(message.candidate);
+                    break;
+
+                default:
+                    console.warn("Unknown message type:", message.type);
             }
         };
 
-        peerConnection.onnegotiationneeded = async () => {
-            const offer = await peerConnection.createOffer();
+        pc.onicecandidate = (event) => {
+            if (!event.candidate) return;
 
-            await peerConnection.setLocalDescription(offer);
-
-            socketRef.current?.send(
+            socket.send(
                 JSON.stringify({
-                    type: "create-offer",
-                    sdp: peerConnection.localDescription,
+                    type: "ice-candidate",
+                    candidate: event.candidate,
                 })
             );
         };
 
-        getCameraStreamAndSend(peerConnection);
+        pc.onnegotiationneeded = async () => {
+            console.log("Negotiation needed");
+
+            const offer = await pc.createOffer();
+
+            await pc.setLocalDescription(offer);
+
+            socket.send(
+                JSON.stringify({
+                    type: "create-offer",
+                    sdp: pc.localDescription,
+                })
+            );
+        };
+
+        await getCameraStreamAndSend(pc);
     };
 
     const getCameraStreamAndSend = async (
-        peerConnection: RTCPeerConnection
-    ) => {
-        const stream = await navigator.mediaDevices.getUserMedia({
-            video: true,
-            audio: true,
-        });
+        pc: RTCPeerConnection
+    ): Promise<void> => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: true,
+            });
 
-        const video = document.createElement("video");
-        video.srcObject = stream;
-        video.autoplay = true;
-        video.playsInline = true;
-        document.body.appendChild(video);
+            const video = document.createElement("video");
+            video.srcObject = stream;
+            video.autoplay = true;
+            video.playsInline = true;
+            video.muted = true;
 
-        stream.getTracks().forEach((track) => {
-            peerConnection.addTrack(track, stream);
-        });
+            document.body.appendChild(video);
+
+            stream.getTracks().forEach((track) => {
+                console.log("Track added:", track.kind);
+                pc.addTrack(track);
+            });
+        } catch (error) {
+            console.error("Failed to access camera:", error);
+        }
     };
 
     return (
