@@ -39,12 +39,11 @@ export const Receiver = () => {
         peerConnection: RTCPeerConnection
     ) => {
         peerConnection.ontrack = (event) => {
-            console.log("Remote track received", event);
+            console.log("Track received:", event.track.kind);
+            console.log("Streams:", event.streams);
 
             if (remoteVideoRef.current) {
-                remoteVideoRef.current.srcObject = new MediaStream([
-                    event.track,
-                ]);
+                remoteVideoRef.current.srcObject = event.streams[0];
             }
         };
 

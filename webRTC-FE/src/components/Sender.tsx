@@ -109,7 +109,7 @@ export const Sender = () => {
             }
 
             stream.getTracks().forEach((track) => {
-                peerConnection.addTrack(track);
+                peerConnection.addTrack(track, stream);
             });
         } catch (error) {
             console.error("Unable to access media devices:", error);
