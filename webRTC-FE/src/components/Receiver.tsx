@@ -1,73 +1,92 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+
+const SIGNALING_SERVER_URL = "ws://localhost:8080";
 
 export const Receiver = () => {
+    const socketRef = useRef<WebSocket | null>(null);
+    const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
+    const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+
     useEffect(() => {
-        const socket = new WebSocket("ws://localhost:8080");
+        const socket = new WebSocket(SIGNALING_SERVER_URL);
+        socketRef.current = socket;
 
         socket.onopen = () => {
             socket.send(
                 JSON.stringify({
-                    type: "identify-as-receiver",
+                    type: "receiver",
                 })
             );
-        };
 
-        startReceiving(socket);
+            initializePeerConnection(socket);
+        };
 
         return () => {
             socket.close();
+            peerConnectionRef.current?.close();
         };
     }, []);
 
-    const startReceiving = (socket: WebSocket) => {
-        const video = document.createElement("video");
-        video.autoplay = true;
-        video.playsInline = true;
+    const initializePeerConnection = (socket: WebSocket) => {
+        const peerConnection = new RTCPeerConnection();
+        peerConnectionRef.current = peerConnection;
 
-        document.body.appendChild(video);
+        registerPeerConnectionEvents(peerConnection);
+        registerSocketEvents(peerConnection, socket);
+    };
 
-        const pc = new RTCPeerConnection();
+    const registerPeerConnectionEvents = (
+        peerConnection: RTCPeerConnection
+    ) => {
+        peerConnection.ontrack = (event) => {
+            console.log("Remote track received", event);
 
-        pc.ontrack = (event) => {
-            console.log("Track received:", event);
-
-            video.srcObject = new MediaStream([event.track]);
+            if (remoteVideoRef.current) {
+                remoteVideoRef.current.srcObject = new MediaStream([
+                    event.track,
+                ]);
+            }
         };
 
-        pc.onicecandidate = (event) => {
-            if (!event.candidate) return;
+        peerConnection.onicecandidate = (event) => {
+            if (!event.candidate || !socketRef.current) return;
 
-            socket.send(
+            socketRef.current.send(
                 JSON.stringify({
-                    type: "ice-candidate",
+                    type: "iceCandidate",
                     candidate: event.candidate,
                 })
             );
         };
+    };
 
+    const registerSocketEvents = (
+        peerConnection: RTCPeerConnection,
+        socket: WebSocket
+    ) => {
         socket.onmessage = async (event) => {
             const message = JSON.parse(event.data);
 
             switch (message.type) {
-                case "create-offer":
-                    await pc.setRemoteDescription(message.sdp);
+                case "createOffer": {
+                    await peerConnection.setRemoteDescription(message.sdp);
 
-                    const answer = await pc.createAnswer();
+                    const answer = await peerConnection.createAnswer();
 
-                    await pc.setLocalDescription(answer);
+                    await peerConnection.setLocalDescription(answer);
 
                     socket.send(
                         JSON.stringify({
-                            type: "create-answer",
+                            type: "createAnswer",
                             sdp: answer,
                         })
                     );
-                    break;
 
-                case "ice-candidate":
-                    if (pc.remoteDescription) {
-                    await pc.addIceCandidate(message.candidate);
+                    break;
                 }
+
+                case "iceCandidate":
+                    await peerConnection.addIceCandidate(message.candidate);
                     break;
 
                 default:
@@ -76,5 +95,17 @@ export const Receiver = () => {
         };
     };
 
-    return <div>Receiver</div>;
+    return (
+        <div>
+            <h2>Receiver</h2>
+
+            <video
+                ref={remoteVideoRef}
+                autoPlay
+                playsInline
+                controls={false}
+                width={800}
+            />
+        </div>
+    );
 };

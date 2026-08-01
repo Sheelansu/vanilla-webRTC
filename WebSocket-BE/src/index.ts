@@ -1,64 +1,96 @@
-import { WebSocketServer, WebSocket } from "ws"
+import { WebSocket, WebSocketServer } from "ws";
 
-const wss = new WebSocketServer({ port: 8080 });
+const PORT = 8080;
 
-type wsType = null |  WebSocket
-let senderWebSocket: wsType = null;
-let receiverWebSocket: wsType = null;
+const wss = new WebSocketServer({ port: PORT });
 
-wss.on("connection", (ws) => {
-    ws.on("error", console.error);
+let senderSocket: WebSocket | null = null;
+let receiverSocket: WebSocket | null = null;
 
-    ws.on("message", (data: any) => {
-        const message = JSON.parse(data);
+wss.on("connection", (socket) => {
+    console.log("New client connected");
+
+    socket.on("error", (error) => {
+        console.error(error);
+    });
+
+    socket.on("close", () => {
+        if (socket === senderSocket) {
+            console.log("Sender disconnected");
+            senderSocket = null;
+        }
+
+        if (socket === receiverSocket) {
+            console.log("Receiver disconnected");
+            receiverSocket = null;
+        }
+    });
+
+    socket.on("message", (data) => {
+        const message = JSON.parse(data.toString());
 
         switch (message.type) {
-            case "identify-as-sender":
-                senderWebSocket = ws;
+            case "sender":
+                senderSocket = socket;
+                console.log("Sender registered");
                 break;
 
-            case "identify-as-receiver":
-                receiverWebSocket = ws;
+            case "receiver":
+                receiverSocket = socket;
+                console.log("Receiver registered");
                 break;
 
-            case "create-offer":
-                receiverWebSocket?.send(
+            case "createOffer":
+                if (socket !== senderSocket) return;
+
+                console.log("Forwarding offer");
+
+                receiverSocket?.send(
                     JSON.stringify({
-                        type: "offer",
-                        offer: message.offer,
+                        type: "createOffer",
+                        sdp: message.sdp,
                     })
                 );
                 break;
 
-            case "create-answer":
-                senderWebSocket?.send(
+            case "createAnswer":
+                if (socket !== receiverSocket) return;
+
+                console.log("Forwarding answer");
+
+                senderSocket?.send(
                     JSON.stringify({
-                        type: "answer",
-                        answer: message.answer,
+                        type: "createAnswer",
+                        sdp: message.sdp,
                     })
                 );
                 break;
 
-            case "ice-candidate":
-                if (ws === senderWebSocket) {
-                    receiverWebSocket?.send(
+            case "iceCandidate":
+                console.log("Forwarding ICE candidate");
+
+                if (socket === senderSocket) {
+                    receiverSocket?.send(
                         JSON.stringify({
-                            type: "ice-candidate",
+                            type: "iceCandidate",
                             candidate: message.candidate,
                         })
                     );
-                } else if (ws === receiverWebSocket) {
-                    senderWebSocket?.send(
+                } else if (socket === receiverSocket) {
+                    senderSocket?.send(
                         JSON.stringify({
-                            type: "ice-candidate",
+                            type: "iceCandidate",
                             candidate: message.candidate,
                         })
                     );
                 }
+
                 break;
 
             default:
                 console.warn(`Unknown message type: ${message.type}`);
         }
     });
-}); 
+});
+
+console.log(`Signaling server running on ws://localhost:${PORT}`);
